@@ -1,141 +1,142 @@
-// Drawing only: the world's state and the current screen in, pixels out. The 1280x720 playfield
-// is scaled to fit the window and centred, the margin filled with the backdrop colour. Flat
-// rectangles and circles, canvas text for the HUD and the panels. Text that holds a number is
-// rebuilt only when the number changes, so a frame allocates nothing.
-import { FIELD, FONT, LIVES, PALETTE } from './config.js';
-import { KIND_COIN } from './world.js';
+// Renderer, scene, camera and the sky: a vertex-coloured dome whose colours, the sun's light, the
+// fog and the hemisphere fill all follow the in-game clock, so the game opens at golden hour and
+// slides through sunset into a lit-window night.
+import * as THREE from 'three';
+import { lerp } from './util.js';
 
-export const SCREEN_TITLE = 'title';
-export const SCREEN_PLAY = 'play';
-export const SCREEN_PAUSED = 'paused';
-export const SCREEN_OVER = 'over';
+// [hour, skyTop, horizon, sunColour, sunIntensity, hemiSky, hemiGround, hemiIntensity, night]
+const KEYS = [
+  [0, 0x070b1f, 0x1a2347, 0x6a7bb8, 0.25, 0x2a3566, 0x15151f, 0.6, 1],
+  [5.5, 0x2a3b6e, 0xf09a6a, 0xffa066, 0.9, 0x6a78a8, 0x3a3040, 0.7, 0.6],
+  [7.5, 0x4a90d9, 0xcfe3f2, 0xfff0d0, 2.4, 0xbcd8f5, 0x6f8a58, 1.0, 0],
+  [12, 0x3a86e0, 0xbfe0f7, 0xffffff, 2.8, 0xcfe6ff, 0x7a9a60, 1.1, 0],
+  [16.5, 0x4a82cc, 0xf5d9a8, 0xffd9a0, 2.4, 0xcbd8ee, 0x8a7a5a, 1.0, 0],
+  [18.2, 0x4c5f9f, 0xff8f5a, 0xff9a55, 1.9, 0xb08a9a, 0x5a4a50, 0.9, 0.25],
+  [19.5, 0x2b2a5e, 0xd8566a, 0xe0605a, 1.0, 0x6a5a8a, 0x2a2430, 0.7, 0.75],
+  [21, 0x0f1230, 0x3a2d58, 0x6a7bb8, 0.3, 0x2a3566, 0x15151f, 0.6, 1],
+  [24, 0x070b1f, 0x1a2347, 0x6a7bb8, 0.25, 0x2a3566, 0x15151f, 0.6, 1],
+];
 
-/** The panel's width; its height grows with its lines: room for the title, the lines and the prompt. */
-const PANEL = { width: 600, top: 134, line: 34, bottom: 70 };
-const LIFE_SIZE = 20;
-const LIFE_GAP = 8;
+const cA = new THREE.Color();
+const cB = new THREE.Color();
 
-function cachedLabel(prefix) {
-  let value = -1;
-  let text = '';
-  return function label(next) {
-    if (next !== value) {
-      value = next;
-      text = prefix + next;
-    }
-    return text;
-  };
+function mixColor(out, a, b, t) {
+  cA.setHex(a);
+  cB.setHex(b);
+  return out.copy(cA).lerp(cB, t);
 }
 
 export function createRenderer(canvas) {
-  const context = canvas.getContext('2d');
-  const view = { scale: 1, x: 0, y: 0 };
-  const scoreLabel = cachedLabel('Score ');
-  const levelLabel = cachedLabel('Level ');
-  const finalLabel = cachedLabel('Score ');
-  const bestLabel = cachedLabel('Best ');
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(0xf5b48a, 140, 820);
+  const camera = new THREE.PerspectiveCamera(62, 16 / 9, 0.2, 2600);
+  camera.position.set(0, 10, 0);
 
-  function resize() {
-    const ratio = window.devicePixelRatio || 1;
-    const width = Math.round(window.innerWidth * ratio);
-    const height = Math.round(window.innerHeight * ratio);
-    canvas.width = width;
-    canvas.height = height;
-    view.scale = Math.min(width / FIELD.width, height / FIELD.height);
-    view.x = (width - FIELD.width * view.scale) / 2;
-    view.y = (height - FIELD.height * view.scale) / 2;
+  const sun = new THREE.DirectionalLight(0xffd9a0, 2.4);
+  const hemi = new THREE.HemisphereLight(0xcbd8ee, 0x8a7a5a, 1.0);
+  scene.add(sun, sun.target, hemi);
+
+  // Sky dome.
+  const domeGeo = new THREE.SphereGeometry(1500, 24, 12);
+  const domeColors = new Float32Array(domeGeo.attributes.position.count * 3);
+  domeGeo.setAttribute('color', new THREE.BufferAttribute(domeColors, 3));
+  const dome = new THREE.Mesh(domeGeo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false }));
+  dome.renderOrder = -10;
+  scene.add(dome);
+
+  const sunDisc = new THREE.Mesh(new THREE.CircleGeometry(60, 20), new THREE.MeshBasicMaterial({ color: 0xfff1c0, fog: false, depthWrite: false }));
+  sunDisc.renderOrder = -9;
+  scene.add(sunDisc);
+
+  const starGeo = new THREE.BufferGeometry();
+  const stars = [];
+  for (let k = 0; k < 260; k += 1) {
+    const a = Math.random() * Math.PI * 2;
+    const e = Math.acos(Math.random() * 0.95);
+    stars.push(Math.cos(a) * Math.sin(e) * 1400, Math.cos(e) * 1400, Math.sin(a) * Math.sin(e) * 1400);
   }
+  starGeo.setAttribute('position', new THREE.Float32BufferAttribute(stars, 3));
+  const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 4, sizeAttenuation: false, transparent: true, opacity: 0, fog: false, depthWrite: false });
+  const starPoints = new THREE.Points(starGeo, starMat);
+  scene.add(starPoints);
 
-  const fonts = new Map();
-  function text(value, x, y, size, color, align) {
-    if (!fonts.has(size)) fonts.set(size, `${size}px ${FONT}`);
-    context.font = fonts.get(size);
-    context.fillStyle = color;
-    context.textAlign = align;
-    context.fillText(value, x, y);
-  }
+  const sunDir = new THREE.Vector3();
+  const top = new THREE.Color();
+  const hor = new THREE.Color();
+  const sunCol = new THREE.Color();
+  const tmp = new THREE.Color();
+  const glow = new THREE.Color();
 
-  function drawField(state) {
-    context.fillStyle = PALETTE.sky;
-    context.fillRect(0, 0, FIELD.width, FIELD.height);
-    context.fillStyle = PALETTE.ground;
-    context.fillRect(0, FIELD.groundY, FIELD.width, FIELD.height - FIELD.groundY);
+  const api = { renderer, scene, camera, night: 0, sunDir };
 
-    const items = state.items;
-    for (let index = 0; index < items.length; index += 1) {
-      const item = items[index];
-      if (!item.active) continue;
-      if (item.kind === KIND_COIN) {
-        context.fillStyle = PALETTE.coin;
-        context.beginPath();
-        context.arc(item.x + item.width / 2, item.y + item.height / 2, item.width / 2, 0, Math.PI * 2);
-        context.fill();
-      } else {
-        context.fillStyle = PALETTE.block;
-        context.fillRect(item.x, item.y, item.width, item.height);
-      }
+  api.setTime = (hour) => {
+    const h = ((hour % 24) + 24) % 24;
+    let k = 0;
+    while (k < KEYS.length - 2 && h >= KEYS[k + 1][0]) k += 1;
+    const a = KEYS[k];
+    const b = KEYS[k + 1];
+    const t = (h - a[0]) / (b[0] - a[0]);
+    mixColor(top, a[1], b[1], t);
+    mixColor(hor, a[2], b[2], t);
+    mixColor(sunCol, a[3], b[3], t);
+    const sunInt = lerp(a[4], b[4], t);
+    mixColor(hemi.color, a[5], b[5], t);
+    mixColor(hemi.groundColor, a[6], b[6], t);
+    hemi.intensity = lerp(a[7], b[7], t);
+    api.night = lerp(a[8], b[8], t);
+    sun.color.copy(sunCol);
+    sun.intensity = sunInt;
+
+    // Sun / moon direction: east at 6h, west at 18h, leaning south over the bay.
+    const theta = ((h - 6) / 12) * Math.PI;
+    const day = Math.sin(theta);
+    const elev = Math.max(0.04, Math.abs(day)) * (day >= 0 ? 1 : 0.6);
+    const el = Math.asin(Math.min(0.95, elev * 0.95));
+    sunDir.set(Math.cos(theta) * Math.cos(el), Math.sin(el), 0.45 * Math.cos(el)).normalize();
+    scene.fog.color.copy(hor);
+
+    // Repaint the dome.
+    const pos = domeGeo.attributes.position;
+    for (let v = 0; v < pos.count; v += 1) {
+      const y = pos.getY(v) / 1500;
+      const s = Math.min(1, Math.max(0, y)) ** 0.55;
+      tmp.copy(hor).lerp(top, s);
+      if (y < 0) tmp.copy(hor).multiplyScalar(0.8);
+      const dx = pos.getX(v) / 1500;
+      const dz = pos.getZ(v) / 1500;
+      const d = Math.max(0, dx * sunDir.x + y * sunDir.y + dz * sunDir.z);
+      const g = d ** 10 * (1 - api.night * 0.6) * 0.7;
+      glow.copy(sunCol).multiplyScalar(g);
+      domeColors[v * 3] = tmp.r + glow.r;
+      domeColors[v * 3 + 1] = tmp.g + glow.g;
+      domeColors[v * 3 + 2] = tmp.b + glow.b;
     }
+    domeGeo.attributes.color.needsUpdate = true;
+    starMat.opacity = Math.max(0, api.night - 0.55) * 2;
+    sunDisc.material.color.copy(sunCol).lerp(new THREE.Color(0xffffff), 0.35);
+    sunDisc.visible = api.night < 0.9;
+  };
 
-    const player = state.player;
-    // Blink while invulnerable after a hit: hidden on every other tenth of a second.
-    if (player.invulnerable === 0 || Math.floor(player.invulnerable * 10) % 2 === 1) {
-      context.fillStyle = PALETTE.player;
-      context.fillRect(player.x, player.y, player.width, player.height);
-    }
-  }
+  api.follow = (pos) => {
+    dome.position.copy(pos);
+    starPoints.position.copy(pos);
+    sunDisc.position.copy(pos).addScaledVector(sunDir, 1350);
+    sunDisc.lookAt(pos);
+    sun.position.copy(pos).addScaledVector(sunDir, 200);
+    sun.target.position.copy(pos);
+  };
 
-  function drawHud(state) {
-    context.textBaseline = 'top';
-    text(scoreLabel(state.score), 24, 20, 28, PALETTE.text, 'left');
-    text(levelLabel(state.level), FIELD.width / 2, 20, 28, PALETTE.text, 'center');
-    const firstLife = FIELD.width - 24 - LIVES * (LIFE_SIZE + LIFE_GAP) + LIFE_GAP;
-    text('Lives', firstLife - 12, 20, 28, PALETTE.text, 'right');
-    for (let life = 0; life < LIVES; life += 1) {
-      context.fillStyle = life < state.lives ? PALETTE.player : PALETTE.ground;
-      context.fillRect(firstLife + life * (LIFE_SIZE + LIFE_GAP), 24, LIFE_SIZE, LIFE_SIZE);
-    }
-  }
-
-  function drawPanel(title, lines, prompt) {
-    const height = PANEL.top + lines.length * PANEL.line + PANEL.bottom;
-    const x = (FIELD.width - PANEL.width) / 2;
-    const y = (FIELD.height - height) / 2;
-    context.fillStyle = PALETTE.panel;
-    context.fillRect(x, y, PANEL.width, height);
-    context.textBaseline = 'alphabetic';
-    text(title, FIELD.width / 2, y + 78, 48, PALETTE.text, 'center');
-    for (let index = 0; index < lines.length; index += 1) {
-      text(lines[index], FIELD.width / 2, y + PANEL.top + index * PANEL.line, 22, PALETTE.muted, 'center');
-    }
-    text(prompt, FIELD.width / 2, y + height - 40, 24, PALETTE.coin, 'center');
-  }
-
-  const TITLE_LINES = ['Dodge the red blocks. Catch the gold coins.', 'Move with ← → or A D.  Pause with P.', ''];
-  const PAUSED_LINES = ['The blocks will wait for you.'];
-  const OVER_LINES = ['', ''];
-
-  /** Paint one frame: the field, then the HUD or a panel for the screen the game is on. */
-  function draw(state, screen, best) {
-    context.setTransform(1, 0, 0, 1, 0, 0);
-    context.fillStyle = PALETTE.backdrop;
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.setTransform(view.scale, 0, 0, view.scale, view.x, view.y);
-    drawField(state);
-    if (screen === SCREEN_TITLE) {
-      TITLE_LINES[2] = bestLabel(best);
-      drawPanel('Block Dodger', TITLE_LINES, 'Press Space or click to start');
-      return;
-    }
-    drawHud(state);
-    if (screen === SCREEN_PAUSED) drawPanel('Paused', PAUSED_LINES, 'Press P to resume');
-    else if (screen === SCREEN_OVER) {
-      OVER_LINES[0] = finalLabel(state.score);
-      OVER_LINES[1] = bestLabel(best);
-      drawPanel('Game over', OVER_LINES, 'Press Space or click to play again');
-    }
-  }
-
-  resize();
-  window.addEventListener('resize', resize);
-  return { draw };
+  api.resize = () => {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  };
+  api.resize();
+  window.addEventListener('resize', api.resize);
+  api.setTime(17.5);
+  return api;
 }

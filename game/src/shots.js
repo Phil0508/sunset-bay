@@ -1,79 +1,111 @@
-// The screenshot scenes behind ?shot=start|play|end. Each one plays the real rules forward from a
-// fresh world for a fixed number of steps, steered by a simple autopilot (look ahead each way the
-// paddle could move, keep clear of blocks, chase the lowest coin when that is safe), so the frame
-// is what a short game really looks like and the same seed always gives the same frame.
-import { FIELD, PLAYER, STEP } from './config.js';
-import { EVENT_OVER, KIND_BLOCK } from './world.js';
-import { SCREEN_OVER, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
+// Deterministic screenshot scenes behind ?shot=chase|walk|fight|title (&seed=N). Each one builds a
+// moment of the real game (same systems, same rules), steps the simulation a fixed number of
+// ticks and leaves the camera where a player would have it, so the same seed always gives the
+// same frame. The page sets window.__shotReady when the frame has been painted.
+import { STEP, POI, lineC } from './config.js';
 
-const START_SECONDS = 5;
-const PLAY_SECONDS = 26;
-const END_LIMIT_SECONDS = 600;
-/**
- * How far ahead, in seconds, the autopilot checks each way it could move: the play scene's pilot
- * looks well ahead and keeps all its lives; the end scene's looks only a moment ahead, so it is
- * caught out once the blocks speed up, as a hurried player is.
- */
-const HORIZON_PLAY = 0.7;
-const HORIZON_END = 0.25;
-const SAMPLE = 1 / 30;
-const DIRECTIONS = [0, -1, 1];
-/** Extra room, each side, it keeps between the paddle and a block. */
-const MARGIN = 10;
-
-/** Seconds until moving in `direction` (-1, 0, 1) runs the paddle into a block; Infinity when it never does. */
-function timeToHit(state, direction, horizon) {
-  const player = state.player;
-  for (let t = SAMPLE; t <= horizon; t += SAMPLE) {
-    const x = Math.min(FIELD.width - player.width, Math.max(0, player.x + direction * PLAYER.speed * t));
-    for (let index = 0; index < state.items.length; index += 1) {
-      const item = state.items[index];
-      if (!item.active || item.kind !== KIND_BLOCK) continue;
-      const y = item.y + item.speed * t;
-      if (y + item.height > player.y && y < player.y + player.height && item.x < x + player.width + MARGIN && item.x + item.width > x - MARGIN) return t;
-    }
-  }
-  return Infinity;
+function enterPlay(game, menus) {
+  menus.hideStart();
+  game.state = 'play';
+  game.hud.show();
+  game.input.enabled = false;
 }
 
-/** Of the safe ways to move, the one toward the lowest coin (or the centre); else the one that is hit last. */
-function autopilot(state, horizon) {
-  const player = state.player;
-  let coin = null;
-  for (let index = 0; index < state.items.length; index += 1) {
-    const item = state.items[index];
-    if (item.active && item.kind !== KIND_BLOCK && (coin === null || item.y > coin.y)) coin = item;
-  }
-  const target = coin === null ? FIELD.width / 2 : coin.x + coin.width / 2;
-  const centre = player.x + player.width / 2;
-  const wanted = target > centre + 8 ? 1 : target < centre - 8 ? -1 : 0;
-  let best = wanted;
-  let bestTime = timeToHit(state, wanted, horizon);
-  for (let index = 0; index < DIRECTIONS.length && bestTime !== Infinity; index += 1) {
-    const time = timeToHit(state, DIRECTIONS[index], horizon);
-    if (time > bestTime) {
-      bestTime = time;
-      best = DIRECTIONS[index];
-    }
-  }
-  return best;
+function run(game, steps) {
+  for (let k = 0; k < steps; k += 1) game.step(STEP);
 }
 
-/**
- * Set `world` to the named scene (start, play or end; any other name is start) and return the
- * screen to draw over it and the best score to show.
- */
-export function stageShot(name, world) {
-  world.reset();
-  if (name !== 'play' && name !== 'end') {
-    for (let index = 0; index < START_SECONDS / STEP; index += 1) world.step(STEP, 0, true);
-    return { screen: SCREEN_TITLE, best: 0 };
-  }
-  const limit = name === 'end' ? END_LIMIT_SECONDS : PLAY_SECONDS;
-  const horizon = name === 'end' ? HORIZON_END : HORIZON_PLAY;
-  for (let index = 0; index < limit / STEP; index += 1) {
-    if (world.step(STEP, autopilot(world.state, horizon), false) & EVENT_OVER) break;
-  }
-  const over = world.state.lives === 0;
-  return { screen: over ? SCREEN_OVER : SCREEN_PLAY, best: world.state.score };
+const SCENES = {
+  // A pink Coral GT with three police cruisers on its tail, mission HUD up.
+  chase(game, { menus }) {
+    enterPlay(game, menus);
+    game.missions.done = 1;
+    game.money = 1150;
+    game.missions.start(1); // Hot Wheels
+    const car = game.missions.active.car;
+    car.x = 150;
+    car.z = -3.5;
+    car.psi = -Math.PI / 2;
+    car.vx = -30;
+    car.vz = 0;
+    for (const c of game.vehicles.list) {
+      if (c !== car && Math.abs(c.z) < 9 && c.x > 40 && c.x < 260) game.vehicles.remove(c);
+    }
+    game.player.teleport(car.x, car.z, car.psi);
+    game.player.enter(car);
+    game.autoInput = { throttle: 1, steer: 0 };
+    run(game, 70);
+    // the cruisers join once the Coral GT is up to speed, a few car lengths behind it
+    for (let k = 0; k < 3; k += 1) {
+      const p = game.traffic.spawnTrafficCar(car.x + 15 + k * 13, k === 1 ? 3.5 : -3.5, { axis: 'x', line: 6, dir: -1, plan: null }, 'police');
+      p.controller = 'police';
+      p.siren = true;
+      p.rv = 1;
+      p.reverseT = 0;
+      p.vx = -38;
+    }
+    game.police.setLevel(3);
+    run(game, 12);
+    game.police.setLevel(3);
+    game.hud.clearBanner();
+    // swing the camera round in front of the car so the pursuit is in frame
+    game.cam.snap(car.psi, 0.2);
+    game.cam.yaw = car.psi + Math.PI - 0.55;
+    game.cam.idle = 0;
+    game.cam.update(0.001);
+  },
+
+  // Mara outside Rosa's office at golden hour: marker beam, taxi, pedestrians, HUD.
+  walk(game, { menus }) {
+    enterPlay(game, menus);
+    game.money = 250;
+    const [x, z] = POI.spawn;
+    const yaw = -Math.PI / 2 + 0.3; // facing west along the street, sunset ahead
+    game.player.teleport(x + 3, z + 1, yaw);
+    game.hud.say('Rosa', "Mara! Over here. Step into the gold marker and I'll tell you what the bay needs tonight.", 30, 0);
+    run(game, 90);
+    game.cam.snap(yaw, 0.3);
+  },
+
+  // The Drop, step one: a firefight with the Razor Kings at the cannery.
+  fight(game, { menus }) {
+    enterPlay(game, menus);
+    game.missions.done = 3;
+    game.money = 2050;
+    game.missions.start(3);
+    const [px, pz] = POI.drop.pickup;
+    game.player.teleport(px - 3, pz + 15, 0);
+    game.player.ammo = 22;
+    for (const e of game.combat.enemies) e.alert = 30;
+    run(game, 40);
+    const target = game.combat.enemies.find((e) => !e.dead) ?? { x: px, z: pz };
+    const yaw = Math.atan2(target.x - game.player.x, target.z - game.player.z);
+    game.player.yaw = yaw;
+    game.cam.snap(yaw, 0.2);
+    game.player.aimT = 1.5;
+    game.player.health = 71;
+    game.police.setLevel(2);
+    run(game, 2);
+    game.hud.clearBanner();
+    game.cam.snap(yaw, 0.2);
+    game.combat.playerShoot();
+    run(game, 1);
+    game.cam.snap(yaw, 0.2);
+  },
+
+  // The title screen over the attract-mode camera.
+  title(game, { menus }) {
+    game.state = 'title';
+    run(game, 160);
+    menus.showStart(false);
+    game.render.camera.position.set(-40, 9, 492);
+    game.render.camera.lookAt(10, 24, 330);
+  },
+};
+
+export function stageShot(game, name, helpers) {
+  const scene = SCENES[name];
+  if (!scene) return;
+  scene(game, helpers);
+  void lineC;
 }

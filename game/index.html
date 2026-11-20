@@ -3,17 +3,81 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Block Dodger</title>
-<style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #11141b; }
-  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
-  /* Read aloud, never shown: the status line screen readers announce. */
-  #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-</style>
+<title>Sunset Bay</title>
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.min.js", "./vendor/three.core.js": "./vendor/three.core.min.js" } }
+</script>
 </head>
 <body>
-<canvas id="game" aria-label="Block Dodger: move the paddle left and right to dodge falling blocks and catch coins"></canvas>
-<p id="status" role="status" aria-live="polite"></p>
+<canvas id="view" aria-label="Sunset Bay game view"></canvas>
+
+<div id="hud" hidden>
+  <div id="top-left">
+    <div id="money">$0</div>
+    <div id="stars"><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span><span>&#9733;</span></div>
+    <div id="clock">17:30</div>
+  </div>
+  <canvas id="minimap" width="220" height="220"></canvas>
+  <div id="bottom-left">
+    <div class="label">HEALTH</div>
+    <div class="bar"><i id="hp"></i></div>
+    <div id="ammo">AMMO 0</div>
+  </div>
+  <div id="speedo" hidden>
+    <div><b id="kmh">0</b><span> km/h</span></div>
+    <div id="carname"></div>
+    <div class="bar small"><i id="carhp"></i></div>
+  </div>
+  <div id="center">
+    <div id="crosshair"></div>
+    <div id="prompt"></div>
+    <div id="bust"><i></i></div>
+  </div>
+  <div id="toasts"></div>
+  <div id="subtitle"></div>
+  <div id="objective"><div id="obj-text"></div><div id="obj-dist"></div></div>
+  <div id="hint"></div>
+  <div id="banner"><h2></h2><p></p></div>
+  <div id="hurt"></div>
+</div>
+
+<div id="screen-start" class="screen">
+  <div class="card">
+    <h1>SUNSET BAY</h1>
+    <p class="tag">One city. One courier. One long golden hour.</p>
+    <p class="story">You are <b>Mara Voss</b>, a courier for Rosa's Courier Co. Sunset Bay never sleeps and neither do its problems: stolen cars, nervous clients, a gang called the Razor Kings and a police force that notices everything. Take Rosa's jobs, keep your nerve, and see how far a fast car and a bad idea can take you.</p>
+    <div class="buttons">
+      <button id="btn-new">New Game</button>
+      <button id="btn-continue">Continue</button>
+    </div>
+    <div class="controls">
+      <span><kbd>W A S D</kbd> move / drive</span><span><kbd>Mouse</kbd> look &amp; aim</span>
+      <span><kbd>Shift</kbd> run</span><span><kbd>Space</kbd> jump / handbrake</span>
+      <span><kbd>E</kbd> enter / exit car</span><span><kbd>F</kbd> punch</span>
+      <span><kbd>Click</kbd> shoot pistol</span><span><kbd>Right-click</kbd> aim</span>
+      <span><kbd>Esc</kbd> pause / save</span><span><kbd>M</kbd> mute</span>
+    </div>
+    <p class="small">Click the game once it starts to capture the mouse.</p>
+  </div>
+</div>
+
+<div id="screen-pause" class="screen" hidden>
+  <div class="card narrow">
+    <h2>PAUSED</h2>
+    <div class="buttons col">
+      <button id="btn-resume">Resume</button>
+      <button id="btn-save">Save Game</button>
+      <button id="btn-quit">Quit to Title</button>
+    </div>
+    <p class="small" id="save-note"></p>
+  </div>
+</div>
+
+<div id="screen-end" class="screen clear" hidden>
+  <div class="endcard"><h1 id="end-title">WASTED</h1><p id="end-sub"></p></div>
+</div>
+
 <script type="module" src="./src/main.js"></script>
 </body>
 </html>
