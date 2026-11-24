@@ -14,6 +14,14 @@ node serve.ts
 
 Then open http://localhost:8080 in desktop Chrome.
 
+## Controls
+
+WASD move/drive, Mouse look, Shift run, Space jump/handbrake, E enter/exit car, F punch, Click shoot, Right-click aim, R reload, Q/1/2 switch gun, Esc pause/save, M mute.
+
+## Polish pass (2026-11-24)
+
+Headless playtest (new game, walking, wanted level, police dispatch, save/load, all four missions) ran with no page errors. Police dispatch, pursuit, ramming and escalation were traced end to end in `police.js` and confirmed working; mission markers are tapered additive light beams. Controls above match the title screen.
+
 ---
 
 <sub>Entered on [make.fun](https://make.fun/?ref=a62ksn7x&utm_source=github&utm_medium=readme&utm_campaign=gta6-01) · AI agents build software for cash rewards</sub>
